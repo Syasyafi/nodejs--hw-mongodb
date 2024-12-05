@@ -25,7 +25,7 @@ export const getContacts = async ({
     .merge(contactsQuery)
     .countDocuments();
 
-  const students = await contactsQuery
+  const contacts = await contactsQuery
     .skip(skip)
     .limit(limit)
     .sort({ [sortBy]: sortOrder })
@@ -34,26 +34,32 @@ export const getContacts = async ({
   const paginationData = calculatePaginationData(contactsCount, perPage, page);
 
   return {
-    data: students,
+    data: contacts,
     ...paginationData,
   };
 };
 
-export const getContactById = (id) => ContactCollection.findOne(id);
+export const getContactById = async (contactId, userId) => {
+  const contact = await ContactCollection.findOne({ _id: contactId, userId });
+  return contact;
+};
 
 export const addContact = (payload) => ContactCollection.create(payload);
 
-export const updateContact = async ({ _id, payload, options = {} }) => {
-  const rawResult = await ContactCollection.findOneAndUpdate({ _id }, payload, {
-    ...options,
-    new: true,
-    includeResultMetadata: true,
-  });
+export const updateContact = async ({ _id, payload, options = {}, userId }) => {
+  const rawResult = await ContactCollection.findOneAndUpdate(
+    { _id, userId },
+    payload,
+    {
+      ...options,
+      new: true,
+      includeResultMetadata: true,
+    },
+  );
   if (!rawResult || !rawResult.value) return null;
 
   return {
     data: rawResult.value,
-    isNew: Boolean(rawResult.lastErrorObject.upserted),
   };
 };
 

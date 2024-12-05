@@ -3,6 +3,11 @@ import createHttpError from 'http-errors';
 import { parsePaginationParams } from '../utils/parsePaginationParams.js';
 import { parseSortParams } from '../utils/parseSortParams.js';
 import { parseFilterParams } from '../utils/parseContactsFilterParams.js';
+import { saveFileToUploadDir } from '../utils/saveFileToUploadDir.js';
+import { saveFileToCloudinary } from '../utils/saveFileToCloudinary.js';
+import { env } from '../utils/env.js';
+import * as path from 'node:path';
+import mongoose from 'mongoose';
 
 export const getContactsController = async (req, res, next) => {
   const { page, perPage } = parsePaginationParams(req.query);
@@ -28,7 +33,12 @@ export const getContactsController = async (req, res, next) => {
 
 export const getContactByIdController = async (req, res, next) => {
   const { id } = req.params;
-  const data = await contactServices.getContactById(id);
+  const { _id: userId } = req.user;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw createHttpError(404, 'Contact not found');
+  }
+  const data = await contactServices.getContactById(id, userId);
 
   if (!data) {
     throw createHttpError(404, 'Contact not found');
@@ -43,23 +53,34 @@ export const getContactByIdController = async (req, res, next) => {
 
 export const addContactController = async (req, res, next) => {
   const { _id: userId } = req.user;
+  let photo = null;
+  if (req.file) {
+    if (env('ENABLE_CLOUDINARY') === 'true') {
+      photo = await saveFileToCloudinary(req.file, 'photo');
+    } else {
+      await saveFileToUploadDir(req.file);
+      photo = path.join(req.file.filename);
+    }
+  }
 
-  const data = await contactServices.addContact({ ...req.body, userId });
+  const data = await contactServices.addContact({ ...req.body, photo, userId });
 
   res.status(201).json({
     status: 201,
-    message: 'Contacts successfullt added',
+    message: 'Contacts successfully added',
     data,
   });
 };
 
 export const upsertContactController = async (req, res) => {
   const { id: _id } = req.params;
+  const { _id: userId } = req.user;
 
   const result = await contactServices.updateContact({
     _id,
     payload: req.body,
     options: { upsert: true },
+    userId,
   });
 
   const status = result.isNew ? 201 : 200;
@@ -67,16 +88,27 @@ export const upsertContactController = async (req, res) => {
   res.status(status).json({
     status,
     message: 'Contact update successfull',
-    data: result,
+    data: result.data,
   });
 };
 
 export const patchContactController = async (req, res) => {
   const { id: _id } = req.params;
+  const { id: userId } = req.user;
+  let photo = null;
 
+  if (req.file) {
+    if (env('ENABLE_CLOUDINARY') === 'true') {
+      photo = await saveFileToCloudinary(req.file, 'photo');
+    } else {
+      await saveFileToUploadDir(req.file);
+      photo = path.join('uploads', req.file.filename);
+    }
+  }
   const result = await contactServices.updateContact({
     _id,
-    payload: req.body,
+    userId,
+    payload: { ...req.body, ...(photo && { photo }) },
   });
 
   if (!result) {
@@ -92,8 +124,9 @@ export const patchContactController = async (req, res) => {
 
 export const deleteContactController = async (req, res) => {
   const { id: _id } = req.params;
+  const { _id: userId } = req.user;
 
-  const data = await contactServices.deleteContact({ _id });
+  const data = await contactServices.deleteContact({ _id, userId });
 
   if (!data) {
     throw createHttpError(404, 'Contact not found');
